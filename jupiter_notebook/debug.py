@@ -1,6 +1,7 @@
 # 从SQuAD 2.0出去文本数据，加入随机噪音生成训练集。
 # 比较不同的model的纠错效果。
 # 英文数据
+# encoder-decoder 架构
 
 import json
 import tensorflow as tf
@@ -20,7 +21,7 @@ clean_english_text_file = "./input_data/clean_english_text_file"
 before_add_error_file = "./input_data/before_add_error"
 after_add_error_file = "./input_data/after_add_error"
 change_index_file = "./input_data/change_index_file"
-MAX_LINE_NUMBER = 20000
+MAX_LINE_NUMBER = 200
 
 err_prob = {
     "replace_one_char": 0.4,
@@ -188,6 +189,15 @@ def char2int(file=clean_english_text_file):
     tk.fit_on_texts(all_text)
     return tk
 
+
+# pad 2d 数组
+def pad_sequence(array_2d, arg_max_len=None):
+    max_len = max(len(a) for a in array_2d)
+    if arg_max_len:
+        max_len = arg_max_len
+    return pad_sequences(array_2d, padding="post", maxlen=max_len)
+
+
 # 1. 抽取SQuAD 2.0的问答数据
 json_data = read_squad_examples("./input_data/train-v2.0.json", False)
 abstarct_sentence(json_data)
@@ -215,12 +225,9 @@ np_pad_Y = pad_sequences(np_array_Y, padding='post', maxlen=max_length)
 
 def prepare_test_sentences(tk, sentences, max_length, char_table_size):
     sentences_int = tk.texts_to_sequences(sentences)
-    print(sentences_int)
-    sentences_int_pad = pad_sequences(sentences_int, padding='post', maxlen=max_length)
-    sentence_num = len(sentences)
-    sentences_int_pad_one_hot = np.empty(shape=(sentence_num, max_length, char_table_size))
-    for i in range(0, sentence_num):
-        sentences_int_pad_one_hot[i] = to_categorical(sentences_int_pad[i], num_classes=char_table_size)
+    sample_num = len(sentences_int)
+    np_array = np.array([np.array(xi) for xi in sentences_int])
+    sentences_int_pad_one_hot = one_hot_encode_2d_array(np_array, sample_num, True, max_length, char_table_size)
     return sentences_int_pad_one_hot
 
 
@@ -243,19 +250,26 @@ def reverse_dict(tk, int_array):
     return char_result
 
 
-# 使用自己编码的one_hot来作为输入和输出
+# 将2d转成one_hot的3d
+def one_hot_encode_2d_array(array_2d, sample_num, need_pad, pad_length, code_table_size):
+    np_pad = array_2d
+    if need_pad:
+        np_pad = pad_sequence(array_2d, pad_length)
+    np_pad_one_hot = np.empty(shape=(sample_num, pad_length, code_table_size))
+    for index in range(0, sample_num):
+        cur_one_hot = to_categorical(np_pad[index], num_classes=code_table_size)
+        np_pad_one_hot[index] = cur_one_hot
+    print(np_pad_one_hot.shape)
+    return np_pad_one_hot
+
+
+# 使用自编码的one_hot来作为输入和输出
+# 这种模型不是真的有效果，主要是因为padding的结果被认为是有意义的
 def train_one_hot_simple_char_model(np_pad_X, np_pad_Y, pad_max_length, char_table_size):
     # X, Y转化为one-hot
-    rows = np_pad_Y.shape[0]
-    np_pad_one_hot_Y = np.empty(shape=(rows, pad_max_length, char_table_size))
-    np_pad_one_hot_X = np.empty(shape=(rows, pad_max_length, char_table_size))
-    for index in range(0, rows):
-        cur_one_hot_x = to_categorical(np_pad_X[index], num_classes=char_table_size)
-        cur_one_hot_y = to_categorical(np_pad_Y[index], num_classes=char_table_size)
-        np_pad_one_hot_X[index] = cur_one_hot_x
-        np_pad_one_hot_Y[index] = cur_one_hot_y
-    print(type(np_pad_one_hot_X))
-    print(np_pad_one_hot_X.shape)
+    sample_num = np_pad_Y.shape[0]
+    np_pad_one_hot_Y = one_hot_encode_2d_array(np_pad_X, sample_num, False, pad_max_length, char_table_size)
+    np_pad_one_hot_X = one_hot_encode_2d_array(np_pad_Y, sample_num, False, pad_max_length, char_table_size)
     print('Build model...')
     model = Sequential()
     # LSTM作为首层才需要设置input_shape参数。
@@ -265,18 +279,15 @@ def train_one_hot_simple_char_model(np_pad_X, np_pad_Y, pad_max_length, char_tab
     model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
     print(model.summary())
     print("start training")
-    model.fit(np_pad_one_hot_X, np_pad_one_hot_Y, epochs=1, verbose=1)
+    model.fit(np_pad_one_hot_X, np_pad_one_hot_Y, epochs=10, verbose=1, batch_size=64)
     return model
 
 
-# 这个是many to many，应该用encoder-decoder方法
+# 加入了masking，并且使用Embedding层来编码，效果训练1小时能达到60%
 def train_simple_embedding_model(max_len, feature_num, output, np_pad_X, np_pad_Y):
     char_table_size = feature_num
-    rows = np_pad_Y.shape[0]
-    np_pad_one_hot_Y = np.empty(shape=(rows, max_len, char_table_size))
-    for index in range(0, rows):
-        cur_one_hot_y = to_categorical(np_pad_Y[index], num_classes=char_table_size)
-        np_pad_one_hot_Y[index] = cur_one_hot_y
+    sample_num = np_pad_Y.shape[0]
+    np_pad_one_hot_Y = one_hot_encode_2d_array(np_pad_Y, sample_num, False, max_len, char_table_size)
     print('Build model...')
     model = Sequential()
     model.add(Embedding(input_dim=feature_num, input_length=max_len, output_dim=10, mask_zero=True))
@@ -289,20 +300,19 @@ def train_simple_embedding_model(max_len, feature_num, output, np_pad_X, np_pad_
     return model
 
 
-sentences = [
-    "growing upY"
-]
-
-
-def test_one_hot_simple_mode(model, tk, sentences, max_length, char_table_size):
+def test_one_hot_simple_model(model, tk, sentences, max_length, char_table_size):
     test_np_pad_one_hot_X = prepare_test_sentences(tk, sentences, max_length, char_table_size)
     # print(test_np_pad_one_hot_X)
     predict_Y = model.predict(test_np_pad_one_hot_X, verbose=1)
-    print(predict_Y.shape)
     predict_Y_int = get_dict_index_back(predict_Y)
-    print(predict_Y_int)
     final_result = reverse_dict(tk, predict_Y_int)
-    print(final_result)
+    print("input======================================================================")
+    print(sentences)
+    print(test_np_pad_one_hot_X)
+    print("after======================================================================")
+    print(predict_Y_int)
+    predict_sentence = "".join(final_result)
+    print(predict_sentence)
 
 
 def test_simple_embedding_model(model, tk, sentences, max_length):
@@ -320,9 +330,30 @@ def test_simple_embedding_model(model, tk, sentences, max_length):
     print(predict_sentence)
 
 
-# # one hot model
-# self_one_hot_model = train_one_hot_simple_char_model(np_pad_X, np_pad_Y, max_length, char_table_size)
-# test_one_hot_simple_mode(self_one_hot_model, tk, sentences, max_length, char_table_size)
+def test_teacher_forcing_model():
+    return
+
+
+def test_attention_model():
+    return
+
+
+def test_beam_search_mode():
+    return
+
+
+def test_bi_LSTM_mode():
+    return
+
+
+sentences = [
+    "growing upY"
+]
+
+
+# one hot model
+self_one_hot_model = train_one_hot_simple_char_model(np_pad_X, np_pad_Y, max_length, char_table_size)
+test_one_hot_simple_model(self_one_hot_model, tk, sentences, max_length, char_table_size)
 
 # embedding model
 simple_embedding_model = train_simple_embedding_model(max_length, char_table_size, char_table_size, np_pad_X, np_pad_Y)
