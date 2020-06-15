@@ -1,9 +1,9 @@
 from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 import re
 import gensim
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
-from tensorflow.keras.preprocessing.sequence import pad_sequences
 from numpy import *
 import nltk
 
@@ -41,10 +41,6 @@ def correct_and_wrong_embedding():
     # word_model2.wv.save_word2vec_format("wrong_embedding")
     # word_model3.wv.save_word2vec_format("correct_embedding")
 
-# print("==================test correct_and_wrong_embedding======================")
-# correct_and_wrong_embedding()
-# print("==================test correct_and_wrong_embedding======================")
-
 
 def column_text_to_sentence_array(lines, use_stop_word=False):
     """
@@ -72,16 +68,6 @@ def column_text_to_sentence_array(lines, use_stop_word=False):
     print("total uniq word : {}".format(len(word_set)))
     return sentence_array, word_num, word_set
 
-# print("==================test column_text_to_sentence_array======================")
-# sentence, num, word_set = column_text_to_sentence_array(["I am luru", "you are ivy", "I cannot swim"], False)
-# print("split sentence into segment - ")
-# print(sentence)
-# print("word number - ")
-# print(num)
-# print("unique word - ")
-# print(word_set)
-# print("==================test column_text_to_sentence_array======================")
-
 
 def remove_tags(text):
     return TAG_RE.sub('', text)
@@ -106,19 +92,6 @@ def generate_word_vector_with_gensim(data, embedding_size, window_size, min_coun
     return word_vector
 
 
-print("==================test generate_word_vector_with_gensim======================")
-data = [
-    ["i", "am", "god"],
-    ["you", "are", "idiot"]
-]
-wv = generate_word_vector_with_gensim(data, 5, 2, 1)
-print("word to vector number : {}".format(len(wv.index2word)))
-print("word to int - ")
-for word in wv.vocab:
-    print("{} - {}".format(word, wv[word]))
-print("==================test generate_word_vector_with_gensim======================")
-
-
 """
 这两个函数要配合使用，先根据出现的word生成一个word->int的映射，然后后续的句子按这个词典生成int数组。
 常用于NLP任务中。
@@ -131,25 +104,6 @@ def build_word_to_int_dict(dict_data):
 
 def encoding_word_to_int(tokenizer, real_data):
     return tokenizer.texts_to_sequences(real_data)
-
-
-print("==================test encoding_word_to_int======================")
-dict_data = [
-    ["i", "am", "god"],
-    ["you", "are", "idiot"]
-]
-tokenizer = build_word_to_int_dict(dict_data)
-for word, index in tokenizer.word_index.items():
-    print("{} - {}".format(word, index))
-test_data = [
-    ["i", "am", "idiot"]
-]
-test_encoding = encoding_word_to_int(tokenizer, test_data)
-print(test_encoding)
-# 用0填充
-test_encoding_padding = pad_sequences(test_encoding, padding='post', maxlen=10)
-print(test_encoding_padding)
-print("==================test encoding_word_to_int======================")
 
 
 def build_int_to_vector_mapping(tokenizer, word_vector):
@@ -173,19 +127,6 @@ def build_int_to_vector_mapping(tokenizer, word_vector):
             pass
     return embedding_matrix
 
-print("==================test build_int_to_vector_mapping======================")
-for word in wv.vocab:
-    print("{} - {}".format(word, wv[word]))
-for word, index in tokenizer.word_index.items():
-    print("{} - {}".format(word, index))
-embedding_matrix = build_int_to_vector_mapping(tokenizer, wv)
-for sentence in test_data:
-    for word in sentence:
-        print("word - {}".format(word))
-        print("int - {}, vector from wv - {}".format(tokenizer.word_index[word], wv[word]))
-        print("int - {}, vector from wv - {}".format(tokenizer.word_index[word], embedding_matrix[tokenizer.word_index[word]]))
-print("==================test build_int_to_vector_mapping======================")
-
 
 def char2int(all_text):
     tokenizer = Tokenizer(num_words=None, char_level=True, oov_token="UNK", lower=False)
@@ -193,21 +134,80 @@ def char2int(all_text):
     return tokenizer
 
 
-print("==================test char2int======================")
-wrong_char_data_format = [
-    ["i", "am", "god"],
-    ["you", "are", "idiot"]
-]
-correct_char_data_format = [
-    "i am god",
-    "you are idiot"
-]
-print("wrong char data format output - ")
-tokenizer = char2int(wrong_char_data_format)
-for word, index in tokenizer.word_index.items():
-    print("{} - {}".format(word, index))
-print("correct char data format output - ")
-tokenizer = char2int(correct_char_data_format)
-for word, index in tokenizer.word_index.items():
-    print("{} - {}".format(word, index))
-print("==================test char2int======================")
+if __name__ == "__main__":
+    print("==================test correct_and_wrong_embedding======================")
+    correct_and_wrong_embedding()
+    print("==================test correct_and_wrong_embedding======================")
+
+    print("==================test column_text_to_sentence_array======================")
+    sentence, num, word_set = column_text_to_sentence_array(["I am luru", "you are ivy", "I cannot swim"], False)
+    print("split sentence into segment - ")
+    print(sentence)
+    print("word number - ")
+    print(num)
+    print("unique word - ")
+    print(word_set)
+    print("==================test column_text_to_sentence_array======================")
+
+    print("==================test generate_word_vector_with_gensim======================")
+    data = [
+        ["i", "am", "god"],
+        ["you", "are", "idiot"]
+    ]
+    wv = generate_word_vector_with_gensim(data, 5, 2, 1)
+    print("word to vector number : {}".format(len(wv.index2word)))
+    print("word to int - ")
+    for word in wv.vocab:
+        print("{} - {}".format(word, wv[word]))
+    print("==================test generate_word_vector_with_gensim======================")
+
+    print("==================test encoding_word_to_int======================")
+    dict_data = [
+        ["i", "am", "god"],
+        ["you", "are", "idiot"]
+    ]
+    tokenizer = build_word_to_int_dict(dict_data)
+    for word, index in tokenizer.word_index.items():
+        print("{} - {}".format(word, index))
+    test_data = [
+        ["i", "am", "idiot"]
+    ]
+    test_encoding = encoding_word_to_int(tokenizer, test_data)
+    print(test_encoding)
+    # 用0填充
+    test_encoding_padding = pad_sequences(test_encoding, padding='post', maxlen=10)
+    print(test_encoding_padding)
+    print("==================test encoding_word_to_int======================")
+
+    print("==================test build_int_to_vector_mapping======================")
+    for word in wv.vocab:
+        print("{} - {}".format(word, wv[word]))
+    for word, index in tokenizer.word_index.items():
+        print("{} - {}".format(word, index))
+    embedding_matrix = build_int_to_vector_mapping(tokenizer, wv)
+    for sentence in test_data:
+        for word in sentence:
+            print("word - {}".format(word))
+            print("int - {}, vector from wv - {}".format(tokenizer.word_index[word], wv[word]))
+            print("int - {}, vector from wv - {}".format(tokenizer.word_index[word], embedding_matrix[tokenizer.word_index[word]]))
+    print("==================test build_int_to_vector_mapping======================")
+
+    print("==================test char2int======================")
+    wrong_char_data_format = [
+        ["i", "am", "god"],
+        ["you", "are", "idiot"]
+    ]
+    correct_char_data_format = [
+        "i am god",
+        "you are idiot"
+    ]
+    print("wrong char data format output - ")
+    tokenizer = char2int(wrong_char_data_format)
+    for word, index in tokenizer.word_index.items():
+        print("{} - {}".format(word, index))
+    print("correct char data format output - ")
+    tokenizer = char2int(correct_char_data_format)
+    for word, index in tokenizer.word_index.items():
+        print("{} - {}".format(word, index))
+    print("==================test char2int======================")
+
