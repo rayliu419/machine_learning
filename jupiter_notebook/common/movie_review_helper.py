@@ -8,7 +8,7 @@ import gensim
 """
 不需要在每个子任务中都要读取一遍
 """
-def prepare_movie_review_for_task(line_num=100):
+def prepare_movie_review_for_task(line_num=100, maxlen=100, embedding_size=10):
     # 1. 读取数据
     print("#1 load data")
     movie_reviews = pd.read_csv("/Users/luru/workspace/github/machine_learning/jupiter_notebook/common/input_data/IMDB_Dataset.csv")
@@ -29,7 +29,7 @@ def prepare_movie_review_for_task(line_num=100):
     print("total uniq word : {}".format(len(word_set)))
     print("#3 training with gensim")
     # 3. 使用gensim训练词向量
-    cbow = gensim.models.Word2Vec(data, min_count=1, size=100, window=5)
+    cbow = gensim.models.Word2Vec(data, min_count=1, size=embedding_size, window=5)
     word_vector = cbow.wv
     # like word -> vector dict
     print("word to vecotr number : {}".format(len(word_vector.index2word)))
@@ -48,16 +48,16 @@ def prepare_movie_review_for_task(line_num=100):
     X_test = tokenizer.texts_to_sequences(X_test)
     # 5. 填充成一样的长度，如果越过就是不填充
     print("#5 padding")
-    maxlen = 100
     X_train = pad_sequences(X_train, padding='post', maxlen=maxlen)
     X_test = pad_sequences(X_test, padding='post', maxlen=maxlen)
     # 6. 获取输入层的weights
     print("#6 calculate embedding matrix")
     embedding_mapping = english_preprocess.build_int_to_vector_mapping(tokenizer, word_vector)
     print("#7 print sample information")
-    sample_review, sample_sentiment = X_train[57], Y_train[57]
-    print(sample_review)
-    print(sample_sentiment)
+    # 不能这样打印，因为X_train变为了一个打乱顺序的Series
+    # sample_review, sample_sentiment = X_train[1], Y_train[1]
+    # print(sample_review)
+    # print(sample_sentiment)
     return tokenizer, embedding_mapping, X, Y, X_train, X_test, Y_train, Y_test
 
 
