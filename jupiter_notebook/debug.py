@@ -11,6 +11,7 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 
+
 class TextCNN(nn.Module):
     def __init__(self, args):
         super(TextCNN, self).__init__()
@@ -38,6 +39,18 @@ class TextCNN(nn.Module):
         x = F.max_pool1d(x, x.size(2)).squeeze(2)
         return x
 
+
+def get_embedding_samples(samples, embedding_mapping):
+    samples_mapping = []
+    for sample in samples:
+        cur_sample = []
+        for index in sample:
+            index_embedding = embedding_mapping[index]
+            cur_sample.append(index_embedding)
+        samples_mapping.append(cur_sample)
+    return samples_mapping
+
+
 args = {
     "class_num": 2,
     "filter_sizes": [2, 3, 4],
@@ -47,4 +60,12 @@ args = {
 
 }
 
+print("#0 load movie review data")
 textCNN = TextCNN(args)
+tokenizer, embedding_mapping, X, Y, X_train, X_test, Y_train, Y_test = \
+    movie_review_helper.prepare_movie_review_for_task()
+
+X_train_embedding = get_embedding_samples(X_train, embedding_mapping)
+print(X_train_embedding[0])
+
+
