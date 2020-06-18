@@ -38,6 +38,7 @@ def correct_and_wrong_embedding():
     print(tokenizer3.word_index)
     word_model2 = gensim.models.Word2Vec([["I am god"], ["you are idiot"]], min_count=1, size=5, window=5)
     word_model3 = gensim.models.Word2Vec([["I", "am", "god"], ["you", "are", "idiot"]], min_count=1, size=5, window=5)
+    tokenizer3.texts_to_sequences([["I am idiot"]])
     # word_model2.wv.save_word2vec_format("wrong_embedding")
     # word_model3.wv.save_word2vec_format("correct_embedding")
 
@@ -98,7 +99,7 @@ def generate_word_vector_with_gensim(data, embedding_size, window_size, min_coun
 """
 def build_word_to_int_dict(dict_data):
     tokenizer = Tokenizer(num_words=5000)
-    tokenizer.fit_on_texts(data)
+    tokenizer.fit_on_texts(dict_data)
     return tokenizer
 
 
@@ -211,3 +212,10 @@ if __name__ == "__main__":
         print("{} - {}".format(word, index))
     print("==================test char2int======================")
 
+    print(word_tokenize("cannot"))
+    tokenizer_test = Tokenizer(num_words=5000)
+    # fix_on_texts 的输入句子要是分完词以后的
+    tokenizer_test.fit_on_texts([["I", "cannot", "cry"]])
+    # texts_to_sequences理论上也应该是。
+    test_output = tokenizer_test.texts_to_sequences([["I", "cannot", "cry"]])
+    print(test_output)
