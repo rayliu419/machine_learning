@@ -4,6 +4,7 @@ from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import english_preprocess
 import gensim
+import os
 
 
 def prepare_movie_review_for_task(line_num=100, maxlen=100, embedding_size=10):
@@ -20,7 +21,8 @@ def prepare_movie_review_for_task(line_num=100, maxlen=100, embedding_size=10):
     """
     # 1. 读取数据
     print("#1 load data")
-    movie_reviews = pd.read_csv("/Users/luru/workspace/github/machine_learning/jupiter_notebook/common/input_data/IMDB_Dataset.csv")
+    data_file = os.path.dirname(__file__) + "/input_data/IMDB_Dataset.csv"
+    movie_reviews = pd.read_csv(data_file)
     # movie_reviews.info()
     movie_reviews = movie_reviews[0:line_num]
     # 2. 预处理数据
