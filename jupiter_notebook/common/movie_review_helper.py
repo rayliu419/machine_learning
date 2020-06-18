@@ -18,6 +18,7 @@ def prepare_movie_review_for_task(line_num=100, maxlen=100, embedding_size=10):
         embedding_mapping -
         X, Y - 原始数据
         X_train, X_test, Y_train, Y_test - ndarray
+    所有的load数据的函数都应该返回ndarry的格式，底层的keras或者pytorch在上层再自己转。
     """
     # 1. 读取数据
     print("#1 load data")
