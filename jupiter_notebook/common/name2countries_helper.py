@@ -48,6 +48,7 @@ def prepare_name2countries_data_for_task():
         n_letters - char字符的总数
         country_num - 国家的个数即标签的个数
         char_tokenizer - char的分词符
+        int2country - 编码后的int到country的映射
     """
     all_letters = string.ascii_letters + " .,;'"
     all_countries = []
