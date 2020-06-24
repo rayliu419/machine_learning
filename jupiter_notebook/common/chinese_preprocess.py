@@ -50,15 +50,17 @@ def encode_chinese_to_int(seg_sentences):
     vocab_size = len(tokenizer.word_index) + 1
     return tokenizer, encoded, vocab_size
 
-print("==================test seg chinese to int======================")
-data = [
-    "建功北里",
-    "西直门"
-]
-seg_sentences = seg_chinese_array(data)
-print(seg_sentences)
-tokenizer, encoded, vocab_size = encode_chinese_to_int(seg_sentences)
-for word, index in tokenizer.word_index.items():
-    print("{} - {}".format(word, index))
-print(encoded)
-print("==================test seg chinese to int======================")
+
+if __name__ == "__main__":
+    print("==================test seg chinese to int======================")
+    data = [
+        "建功北里",
+        "西直门"
+    ]
+    seg_sentences = seg_chinese_array(data)
+    print(seg_sentences)
+    tokenizer, encoded, vocab_size = encode_chinese_to_int(seg_sentences)
+    for word, index in tokenizer.word_index.items():
+        print("{} - {}".format(word, index))
+    print(encoded)
+    print("==================test seg chinese to int======================")
