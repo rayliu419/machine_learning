@@ -150,7 +150,7 @@ class AttnDecoderRNN(nn.Module):
          期望的输入x的特征值的维度 
          隐状态的维度 
          RNN的层数
-         为什么是hidden_size * 2呢，因为context也作为输入
+         为什么是hidden_size * 2呢，因为context也作为输入 - 待删除
         """
         self.gru = nn.GRU(hidden_size * 2, hidden_size, n_layers, dropout=dropout_p)
         self.out = nn.Linear(hidden_size * 2, output_size)
@@ -158,9 +158,23 @@ class AttnDecoderRNN(nn.Module):
         if attn_model != 'none':
             self.attn = Attn(attn_model, hidden_size)
 
+# 实现的是Luong Attention的global版本
+# https://blog.floydhub.com/attention-mechanism/
+# 步骤是：
+# 1. 收集encoder的所有输出，作为context向量计算的源头之一。
+# 2. 前面decoder的hidden和输出传入一个decoder的RNN组件，为当前的time step产生一个新的output/hidden
+# 3. 计算Alignment Scores。使用新的output和encoder的所有output算分。有好几种方式。
+# 4. Softmax分数。
+# 5. 使用encoder的输出和计算出来的分数计算context向量。
+# 6. concat context向量和在第二步中生成的output作为输入传如到一个新的DNN并得到输出。
+# 7. 返回重复过程，直到最大长度。
+# 上述整个描述复合整个forward函数，除了使用了last_context，把整个去掉看看。
     def forward(self, word_input, last_context, last_hidden, encoder_outputs):
+
+
         """
         对于decoder，我们是一个单词一个单词的处理的，因为要加入attention
+        感觉这个实现也不完全是按照Luong Attention的global方式做的？
         layer=1的情况
         :param word_input: 2维的，每次一个单词的int表示，例如<SOS_token>是[[0]]
         :param last_context: 2维，(1, hidden_size)
@@ -170,7 +184,7 @@ class AttnDecoderRNN(nn.Module):
         """
         # 获取输入的embedding
         word_embedded = self.embedding(word_input).view(1, 1, -1) # S= 1 x B x N
-        # 组合embedding input和context向量
+        # 组合embedding input和last_context向量，这里的rnn_input为什么用到了last_context? - 拿掉last_context看看
         rnn_input = torch.cat((word_embedded, last_context.unsqueeze(0)), 2)
         rnn_output, hidden = self.gru(rnn_input, last_hidden)
         """
@@ -178,6 +192,7 @@ class AttnDecoderRNN(nn.Module):
         调用的是Attn的forward()函数
         """
         attn_weights = self.attn(rnn_output.squeeze(0), encoder_outputs)
+        # 这个bmm是做了什么啊？- 就是在计算context向量的矩阵运算方法
         context = attn_weights.bmm(encoder_outputs.transpose(0, 1)) # B x 1 x N
         # Final output layer (next word prediction) using the RNN hidden state and context vector
         rnn_output = rnn_output.squeeze(0) # S=1 x B x N -> B x N
