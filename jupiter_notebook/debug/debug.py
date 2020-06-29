@@ -332,8 +332,10 @@ def evaluate(sentence, max_length=MAX_LENGTH):
     decoded_words = []
     decoder_attentions = torch.zeros(max_length, max_length)
     for di in range(max_length):
-        decoder_output, decoder_context, decoder_hidden, decoder_attention = decoder(decoder_input, decoder_context, decoder_hidden, encoder_outputs)
-        decoder_attentions[di, :decoder_attention.size(2)] += decoder_attention.squeeze(0).squeeze(0).cpu().data
+        decoder_output, decoder_context, decoder_hidden, decoder_attention = \
+            decoder(decoder_input, decoder_context, decoder_hidden, encoder_outputs)
+        decoder_attentions[di, :decoder_attention.size(2)] += \
+            decoder_attention.squeeze(0).squeeze(0).cpu().data
         topv, topi = decoder_output.data.topk(1)
         ni = topi.numpy()[0][0]
         if ni == EOS_token:
@@ -390,4 +392,6 @@ evaluate_and_show_attention(pair[0], pair[1])
 
 pair = random.choice(pairs)
 evaluate_and_show_attention(pair[0], pair[1])
+
+
 
