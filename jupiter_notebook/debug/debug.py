@@ -1,5 +1,6 @@
 """
 see https://github.com/spro/practical-pytorch/blob/master/seq2seq-translation/seq2seq-translation.ipynb.
+
 """
 
 import random
@@ -9,6 +10,10 @@ from torch.autograd import Variable
 from torch import optim
 import torch.nn.functional as F
 import time
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import numpy as np
+# %matplotlib inline
 import sys
 sys.path.append("../common/")
 import english2franch_helper
@@ -116,7 +121,7 @@ class Attn(nn.Module):
         for i in range(seq_len):
             attn_energies[i] = self.score(hidden, encoder_outputs[i])
         # resize to 1 x 1 x seq_len
-        return F.softmax(attn_energies).unsqueeze(0).unsqueeze(0)
+        return F.softmax(attn_energies, dim=0).unsqueeze(0).unsqueeze(0)
 
     def score(self, hidden, encoder_output):
         if self.method == 'dot':
@@ -152,26 +157,25 @@ class AttnDecoderRNN(nn.Module):
          RNN的层数
          为什么是hidden_size * 2呢，因为context也作为输入 - 待删除
         """
-        self.gru = nn.GRU(hidden_size * 2, hidden_size, n_layers, dropout=dropout_p)
+        # self.gru = nn.GRU(hidden_size * 2, hidden_size, n_layers, dropout=dropout_p)
+        self.gru = nn.GRU(hidden_size, hidden_size, n_layers, dropout=dropout_p)
         self.out = nn.Linear(hidden_size * 2, output_size)
         # Choose attention model
         if attn_model != 'none':
             self.attn = Attn(attn_model, hidden_size)
 
-# 实现的是Luong Attention的global版本
-# https://blog.floydhub.com/attention-mechanism/
-# 步骤是：
-# 1. 收集encoder的所有输出，作为context向量计算的源头之一。
-# 2. 前面decoder的hidden和输出传入一个decoder的RNN组件，为当前的time step产生一个新的output/hidden
-# 3. 计算Alignment Scores。使用新的output和encoder的所有output算分。有好几种方式。
-# 4. Softmax分数。
-# 5. 使用encoder的输出和计算出来的分数计算context向量。
-# 6. concat context向量和在第二步中生成的output作为输入传如到一个新的DNN并得到输出。
-# 7. 返回重复过程，直到最大长度。
-# 上述整个描述复合整个forward函数，除了使用了last_context，把整个去掉看看。
+    # 实现的是Luong Attention的global版本
+    # https://blog.floydhub.com/attention-mechanism/
+    # 步骤是：
+    # 1. 收集encoder的所有输出，作为context向量计算的源头之一。
+    # 2. 前面decoder的hidden和输出传入一个decoder的RNN组件，为当前的time step产生一个新的output/hidden
+    # 3. 计算Alignment Scores。使用新的output和encoder的所有output算分。有好几种方式。
+    # 4. Softmax分数。
+    # 5. 使用encoder的输出和计算出来的分数计算context向量。
+    # 6. concat context向量和在第二步中生成的output作为输入传如到一个新的DNN并得到输出。
+    # 7. 返回重复过程，直到最大长度。
+    # 上述整个描述复合整个forward函数，除了使用了last_context，把整个去掉看看。
     def forward(self, word_input, last_context, last_hidden, encoder_outputs):
-
-
         """
         对于decoder，我们是一个单词一个单词的处理的，因为要加入attention
         感觉这个实现也不完全是按照Luong Attention的global方式做的？
@@ -185,7 +189,8 @@ class AttnDecoderRNN(nn.Module):
         # 获取输入的embedding
         word_embedded = self.embedding(word_input).view(1, 1, -1) # S= 1 x B x N
         # 组合embedding input和last_context向量，这里的rnn_input为什么用到了last_context? - 拿掉last_context看看
-        rnn_input = torch.cat((word_embedded, last_context.unsqueeze(0)), 2)
+        # rnn_input = torch.cat((word_embedded, last_context.unsqueeze(0)), 2)
+        rnn_input = word_embedded
         rnn_output, hidden = self.gru(rnn_input, last_hidden)
         """
         计算attention的分数。先拿到了rnn_output，然后计算它与前面的encoder_output的相关性。
@@ -197,7 +202,7 @@ class AttnDecoderRNN(nn.Module):
         # Final output layer (next word prediction) using the RNN hidden state and context vector
         rnn_output = rnn_output.squeeze(0) # S=1 x B x N -> B x N
         context = context.squeeze(1)       # B x S=1 x N -> B x N
-        output = F.log_softmax(self.out(torch.cat((rnn_output, context), 1)))
+        output = F.log_softmax(self.out(torch.cat((rnn_output, context), 1)), dim=1)
         # Return final output, hidden state, and attention weights (for visualization)
         return output, context, hidden, attn_weights
 
@@ -248,8 +253,8 @@ def train_single(input_variable, target_variable, encoder, decoder,
             if ni == EOS_token: break
     # 这里说明整个句子被统一计算loss
     loss.backward()
-    torch.nn.utils.clip_grad_norm(encoder.parameters(), clip)
-    torch.nn.utils.clip_grad_norm(decoder.parameters(), clip)
+    torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+    torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
     encoder_optimizer.step()
     decoder_optimizer.step()
     return loss / target_length
@@ -263,39 +268,33 @@ print("#1 define parameters")
 attn_model = 'general'
 hidden_size = 128
 # n_layers = 2
-n_layers = 1
+n_layers = 2
 dropout_p = 0.05
 
-# Initialize models
 encoder = EncoderRNN(input_lang.n_words, hidden_size, n_layers)
 decoder = AttnDecoderRNN(attn_model, hidden_size, output_lang.n_words, n_layers, dropout_p=dropout_p)
 
-# Initialize optimizers and criterion
 learning_rate = 0.0001
 encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
 decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
 criterion = nn.NLLLoss()
-n_epochs = 50000
+n_epochs = 40000
 plot_every = 200
-print_every = 1000
+print_every = 500
 start = time.time()
 plot_losses = []
-print_loss_total = 0 # Reset every print_every
-plot_loss_total = 0 # Reset every plot_every
+print_loss_total = 0
+plot_loss_total = 0
 
 print("#2 start to train")
 for epoch in range(1, n_epochs + 1):
-    # Get training data for this cycle
     training_pair = variables_from_pair(random.choice(pairs))
     # input_variable, target_variable是二维的
     input_variable = training_pair[0]
     target_variable = training_pair[1]
-    # Run the train function
     loss = train_single(input_variable, target_variable, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion)
-    # Keep track of loss
     print_loss_total += loss
     plot_loss_total += loss
-    print("epoch - {}, loss - {}".format(epoch, loss))
     if epoch == 0: continue
     if epoch % print_every == 0:
         print_loss_avg = print_loss_total / print_every
@@ -308,6 +307,87 @@ for epoch in range(1, n_epochs + 1):
         plot_loss_total = 0
 
 
-"""
-Bahdanau et al. model编译不过去，GeneralAttn是什么？
-"""
+def show_plot(points):
+    plt.figure()
+    fig, ax = plt.subplots()
+    loc = ticker.MultipleLocator(base=0.2) # put ticks at regular intervals
+    ax.yaxis.set_major_locator(loc)
+    plt.plot(points)
+
+
+show_plot(plot_losses)
+
+
+def evaluate(sentence, max_length=MAX_LENGTH):
+    """
+    跟train_single的逻辑是类似的。
+    """
+    input_variable = variable_from_sentence(input_lang, sentence)
+    input_length = input_variable.size()[0]
+    encoder_hidden = encoder.init_hidden()
+    encoder_outputs, encoder_hidden = encoder(input_variable, encoder_hidden)
+    decoder_input = Variable(torch.LongTensor([[SOS_token]])) # SOS
+    decoder_context = Variable(torch.zeros(1, decoder.hidden_size))
+    decoder_hidden = encoder_hidden
+    decoded_words = []
+    decoder_attentions = torch.zeros(max_length, max_length)
+    for di in range(max_length):
+        decoder_output, decoder_context, decoder_hidden, decoder_attention = decoder(decoder_input, decoder_context, decoder_hidden, encoder_outputs)
+        decoder_attentions[di, :decoder_attention.size(2)] += decoder_attention.squeeze(0).squeeze(0).cpu().data
+        topv, topi = decoder_output.data.topk(1)
+        ni = topi.numpy()[0][0]
+        if ni == EOS_token:
+            decoded_words.append('<EOS>')
+            break
+        else:
+            decoded_words.append(output_lang.index2word[ni])
+        # Next input is chosen word
+        decoder_input = Variable(torch.LongTensor([[ni]]))
+    return decoded_words, decoder_attentions[:di+1, :len(encoder_outputs)]
+
+
+def evaluate_randomly():
+    pair = random.choice(pairs)
+    output_words, decoder_attn = evaluate(pair[0])
+    output_sentence = ' '.join(output_words)
+    print('>', pair[0])
+    print('=', pair[1])
+    print('<', output_sentence)
+    print('')
+
+
+print("#3 random sample")
+evaluate_randomly()
+
+
+def show_attention(input_sentence, output_words, attentions):
+    # Set up figure with colorbar
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    cax = ax.matshow(attentions.numpy(), cmap='bone')
+    fig.colorbar(cax)
+    # Set up axes
+    ax.set_xticklabels([''] + input_sentence.split(' ') + ['<EOS>'], rotation=90)
+    ax.set_yticklabels([''] + output_words)
+    # Show label at every tick
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
+    plt.show()
+    plt.close()
+
+
+def evaluate_and_show_attention(input_sentence, target_sentence):
+    output_words, attentions = evaluate(input_sentence)
+    print('input =', input_sentence)
+    print('target=', target_sentence)
+    print('output =', ' '.join(output_words))
+    show_attention(input_sentence, output_words, attentions)
+
+
+print("#4 show attention")
+pair = random.choice(pairs)
+evaluate_and_show_attention(pair[0], pair[1])
+
+pair = random.choice(pairs)
+evaluate_and_show_attention(pair[0], pair[1])
+
