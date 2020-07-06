@@ -13,5 +13,5 @@ def time_since(since, percent):
     s = now - since
     es = s / (percent)
     rs = es - s
-    return '%s (- %s)' % (as_minutes(s), as_minutes(rs))
+    return '(has cost - %s) ( estimated rest - %s)' % (as_minutes(s), as_minutes(rs))
 

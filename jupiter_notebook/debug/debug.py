@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math, copy, time
 from torch.autograd import Variable
+from torchsummary import summary
 import matplotlib.pyplot as plt
 import seaborn
 seaborn.set_context(context="talk")
@@ -18,6 +19,8 @@ from IPython.display import Image
 import sys
 sys.path.append("../common/")
 import model_utils
+import time_utils
+
 
 class EncoderDecoder(nn.Module):
     """
@@ -215,7 +218,10 @@ class DecoderLayer(nn.Module):
 
     def forward(self, x, memory, src_mask, tgt_mask):
         m = memory
+        # decoder先自己计算一下attention，注意这个mask传入是有值的。
+        # scores在decoder的mask的方式是给attention score一个很小的值。
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
+        # 计算与encoder最终输出的各个word的encoding的attention得分，src_mask全为True，不mask
         x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, src_mask))
         return self.sublayer[2](x, self.feed_forward)
 
@@ -249,6 +255,7 @@ def attention(query, key, value, mask=None, dropout=None):
     实际上使用矩阵计算，计算都是一些query一起计算
     """
     d_k = query.size(-1)
+    #
     scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
@@ -264,7 +271,7 @@ class MultiHeadedAttention(nn.Module):
         super(MultiHeadedAttention, self).__init__()
         # We assume d_v always equals d_k
         assert d_model % h == 0
-        # // 在python3中是int除法
+        # 在python3中是int除法, d_k是单个head的query,key,value的维度
         self.d_k = d_model // h
         # h是head的个数
         self.h = h
@@ -279,6 +286,8 @@ class MultiHeadedAttention(nn.Module):
             mask = mask.unsqueeze(1)
         nbatches = query.size(0)
         # 1) Do all the linear projections in batch from d_model => h x d_k
+        # self-attention可以看做是原始输入是一个embedding，但是通过一个self-attention，调整这个embedding的表示。
+        # 最初始的query, key, value就是原始的embedding
         query, key, value = \
             [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
              for l, x in zip(self.linears, (query, key, value))]
@@ -286,7 +295,8 @@ class MultiHeadedAttention(nn.Module):
         # 2) Apply attention on all the projected vectors in batch.
         x, self.attn = attention(query, key, value, mask=mask, dropout=self.dropout)
 
-        # 3) "Concat" using a view and apply a final linear.
+        # 3) "Concat" using a view and apply a final linear。就是把多头的attention向量搞到一起。
+        # 调用view之前最好先contiguous，x.contiguous().view()。因为view需要tensor的内存是整块的
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
         return self.linears[-1](x)
 
@@ -303,6 +313,7 @@ class Embeddings(nn.Module):
 
     def forward(self, x):
         # 后面这个操作是干啥？
+        # 即使对于简单的copy序列的例子，也做了embedding
         return self.lut(x) * math.sqrt(self.d_model)
 
 
@@ -335,7 +346,7 @@ tgt_vocab - target的word dict size
 N - encoder和decoder的堆叠层数
 d_model - 单个word的encoder的输入维度
 """
-def make_model(src_vocab, tgt_vocab, N=2, d_model=256, d_ff=512, h=2, dropout=0.1):
+def make_model(src_vocab, tgt_vocab, stack_number =2, d_model=256, d_ff=512, h=2, dropout=0.1):
     c = copy.deepcopy
     # encoder/decoder的attention层，2个head，模型的输入size=d_model
     attn = MultiHeadedAttention(h, d_model)
@@ -343,8 +354,8 @@ def make_model(src_vocab, tgt_vocab, N=2, d_model=256, d_ff=512, h=2, dropout=0.
     ff = PositionwiseFeedForward(d_model, d_ff, dropout)
     position = PositionalEncoding(d_model, dropout)
     model = EncoderDecoder(
-        Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
-        Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
+        Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), stack_number),
+        Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), stack_number),
         # word embedding + positional encoding
         nn.Sequential(Embeddings(d_model, src_vocab), c(position)),
         nn.Sequential(Embeddings(d_model, tgt_vocab), c(position)),
@@ -355,9 +366,6 @@ def make_model(src_vocab, tgt_vocab, N=2, d_model=256, d_ff=512, h=2, dropout=0.
         if p.dim() > 1:
             nn.init.xavier_uniform_(p)
     return model
-
-tmp_model = make_model(10, 10, 2)
-model_utils.model_parameters_number(tmp_model)
 
 
 class Batch:
@@ -370,8 +378,11 @@ class Batch:
         if trg is not None:
             self.trg = trg[:, :-1]
             self.trg_y = trg[:, 1:]
+            # 对于target，返回的是类似tensor([true, false, false...], [true, true, false, false])
+            # 表示decoder预测时，只能用到已经看到的token
             self.trg_mask = self.make_std_mask(self.trg, pad)
-            # ntokens是什么？
+            # 假设pad用0来表示，这里计算的是实际有效的token
+            # self.trg_y != pad 用tensor与0比较，返回类似 tensor([[True, True, True]])
             self.ntokens = (self.trg_y != pad).data.sum()
 
     @staticmethod
@@ -489,10 +500,10 @@ def run_epoch(data_iter, model, loss_compute, train=True):
         #           (i, loss / batch.ntokens, tokens / elapsed))
         #     start = time.time()
         #     tokens = 0
-    if train:
-        print("Train loss: %f per tokens" % (total_loss / total_tokens))
-    else:
-        print("Test loss: %f per tokens" % (total_loss / total_tokens))
+    # if train:
+    #     print("Train loss: %f per tokens" % (total_loss / total_tokens))
+    # else:
+    #     print("Test loss: %f per tokens" % (total_loss / total_tokens))
     return total_loss / total_tokens
 
 
@@ -520,27 +531,36 @@ def copy_data_gen(V, batch, nbatches):
 还需要一个个跟进来看看这个是怎么走的。
 """
 print("#1 init component")
-V = 11
-criterion = LabelSmoothing(size=V, padding_idx=0, smoothing=0.0)
-model = make_model(V, V, N=2)
-model_utils.model_parameters_number(tmp_model)
+vocab_size = 11
+criterion = LabelSmoothing(size=vocab_size, padding_idx=0, smoothing=0.0)
+model = make_model(vocab_size, vocab_size, 2, 128)
+model_utils.model_parameters_number(model)
 model_opt = NoamOpt(model.src_embed[0].d_model, 1, 400,
                     torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
+print(model)
+# summary(model, (30, 10))
+
 print("#2 generate data and training")
-for epoch in range(10):
-    print("epoch - {}".format(epoch))
+start = time.time()
+n_epochs = 20
+for epoch in range(n_epochs):
+    # print("epoch - {}".format(epoch))
     # 调用nn.Module.train()会把所有的module设置为训练模式，调用model.eval()会把所有的training属性设置为False。
     # 对于像dropout, batchNorm等操作，train和eval模式的行为有一些不同。
     model.train()
-    train_data_iter = copy_data_gen(V, 30, 20)
-    run_epoch(train_data_iter, model, SimpleLossCompute(model.generator, criterion, model_opt))
+    train_data_iter = copy_data_gen(vocab_size, 30, 20)
+    epoch_train_loss = run_epoch(train_data_iter, model, SimpleLossCompute(model.generator, criterion, model_opt))
     model.eval()
-    test_data_iter = copy_data_gen(V, 30, 5)
-    print(run_epoch(test_data_iter, model, SimpleLossCompute(model.generator, criterion, None), False))
+    test_data_iter = copy_data_gen(vocab_size, 30, 5)
+    epoch_test_loss = run_epoch(test_data_iter, model, SimpleLossCompute(model.generator, criterion, None), False)
+    summary = "%s epoch - %s train_loss - %f test_loss - %f" % \
+              (time_utils.time_since(start, (epoch + 1) / n_epochs ), epoch + 1, epoch_train_loss, epoch_test_loss)
+    print(summary)
+
 
 print("#3 print some test result")
 model.eval()
-print_test_data = copy_data_gen(V, 10, 1)
+print_test_data = copy_data_gen(vocab_size, 10, 1)
 for i, batch in enumerate(print_test_data):
     src_mask = Variable(torch.ones(1, 1, 10))
     src = batch.src
