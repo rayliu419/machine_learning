@@ -87,6 +87,7 @@ def get_word_dict(seg_sentences):
     :return:
     """
     tokenizer = Tokenizer()
+    # tokenizer会把0预留出来作为表示句子结束<EOS>，如果还要加入<BOS>怎么做？
     tokenizer.fit_on_texts(seg_sentences)
     vocab_size = len(tokenizer.word_index) + 1
     return tokenizer, vocab_size
