@@ -1,0 +1,12 @@
+*.DS_STORE
+.ipynb_checkpoints
+venv/
+data/
+.idea/
+__pycache__/
+out/
+*.iml
+input_data/
+output_data/
+model_info/
+*.pt
