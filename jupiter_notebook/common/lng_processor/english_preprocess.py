@@ -39,8 +39,8 @@ def correct_and_wrong_embedding():
     word_model2 = gensim.models.Word2Vec([["I am god"], ["you are idiot"]], min_count=1, size=5, window=5)
     word_model3 = gensim.models.Word2Vec([["I", "am", "god"], ["you", "are", "idiot"]], min_count=1, size=5, window=5)
     tokenizer3.texts_to_sequences([["I am idiot"]])
-    # word_model2.wv.save_word2vec_format("wrong_embedding")
-    # word_model3.wv.save_word2vec_format("correct_embedding")
+    # word_model2.wv.save_word2vec_format("./output/wrong_embedding")
+    # word_model3.wv.save_word2vec_format("./output/correct_embedding")
 
 
 def column_text_to_sentence_array(lines, use_stop_word=False):

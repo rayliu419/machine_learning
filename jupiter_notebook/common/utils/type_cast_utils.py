@@ -12,14 +12,24 @@ def list_to_ndarray(list):
     return np.array(list)
 
 
+def list_to_tensor(list):
+    tensor = torch.Tensor(list)
+    return tensor
+
+
+def var_list_to_tensor(list_of_list, padding):
+    maxlen = max(len(l) for l in list_of_list)
+    new_matrix = list(map(lambda l: l + [padding] * (maxlen - len(l)), list_of_list))
+    return list_to_tensor(new_matrix)
+
+
 def ndarray_to_list(ndarray):
     list = ndarray.tolist()
     return list
 
 
-def list_to_tensor(list):
-    tensor = torch.Tensor(list)
-    return tensor
+def ndarray_to_tensor(ndarray):
+    return torch.from_numpy(ndarray)
 
 
 def tensor_to_list(tensor):
@@ -32,10 +42,6 @@ def tensor_to_ndarray(tensor):
     # gpu上的tensor不能直接转为numpy
     # np_arr = tensor.cpu().numpy()
     return np_arr
-
-
-def ndarray_to_tensor(ndarray):
-    return torch.from_numpy(ndarray)
 
 
 def series_to_list(series):

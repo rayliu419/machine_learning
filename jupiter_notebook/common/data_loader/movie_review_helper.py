@@ -2,9 +2,28 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-import english_preprocess
+from common.english_preprocess import *
 import gensim
 import os
+
+
+def prepare_movie_review_raw(line_num=100):
+    """
+    :param line_num:
+    :return: two data frame
+    """
+    print("#1 load data")
+    data_file = os.path.dirname(__file__) + "/input_data/IMDB_Dataset.csv"
+    movie_reviews = pd.read_csv(data_file)
+    movie_reviews.info()
+    movie_reviews = movie_reviews[0:line_num]
+    print("#2 clean and processing data")
+    movie_reviews["review"] = movie_reviews["review"].map(lambda x: preprocess_text(x))
+    movie_reviews["sentiment"] = movie_reviews["sentiment"].map(lambda x: 1 if x == "positive" else 0)
+    movie_reviews.head()
+    X = movie_reviews["review"]
+    Y = movie_reviews["sentiment"]
+    return X, Y
 
 
 def prepare_movie_review_for_task(line_num=100, maxlen=100, embedding_size=10):
@@ -28,14 +47,14 @@ def prepare_movie_review_for_task(line_num=100, maxlen=100, embedding_size=10):
     movie_reviews = movie_reviews[0:line_num]
     # 2. 预处理数据
     print("#2 clean and processing data")
-    movie_reviews["review"] = movie_reviews["review"].map(lambda x: english_preprocess.preprocess_text(x))
+    movie_reviews["review"] = movie_reviews["review"].map(lambda x: preprocess_text(x))
     movie_reviews["sentiment"] = movie_reviews["sentiment"].map(lambda x: 1 if x=="positive" else 0)
     movie_reviews.head()
     X = movie_reviews["review"]
     Y = movie_reviews["sentiment"]
     # cannot -> can, not
     # data[13]
-    data, word_num, word_set = english_preprocess.column_text_to_sentence_array(X, False)
+    data, word_num, word_set = column_text_to_sentence_array(X, False)
     print("#3 training with gensim")
     # 3. 使用gensim训练词向量
     cbow = gensim.models.Word2Vec(data, min_count=1, size=embedding_size, window=5)
@@ -57,7 +76,7 @@ def prepare_movie_review_for_task(line_num=100, maxlen=100, embedding_size=10):
     X_int_padding = pad_sequences(X_int, padding='post', maxlen=maxlen)
     # 6. 获取输入层的weights
     print("#6 calculate embedding matrix")
-    embedding_mapping = english_preprocess.build_int_to_vector_mapping(tokenizer, word_vector)
+    embedding_mapping = build_int_to_vector_mapping(tokenizer, word_vector)
     print("#7 print sample information")
     X_train_np, X_test_np, Y_train, Y_test = train_test_split(X_int_padding, Y, test_size=0.20, random_state=42)
     Y_train_np = Y_train.to_numpy()

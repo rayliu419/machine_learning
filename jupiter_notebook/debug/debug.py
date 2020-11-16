@@ -1,185 +1,147 @@
-"""
-实现esim算法。
-使用天池的数据集来测试esim算法的实际效果。
-使用10000行数据50轮迭代，差不多能达到80%的准确率。
-"""
-
-from torch import nn
-import torch
-import torch.nn.functional as F
-# from toolz.itertoolz.core import partition
 import sys
-sys.path.append("../common/")
-import chinese_preprocess
-import sentence_sim_helper
-import model_utils
-import sequence_utils
-import type_cast_helper
+sys.path.append("..")
+from common.data_loader.load_movie_review import *
+from common.lng_processor.eng_process import *
+from common.utils.sequence_utils import *
+from common.utils.type_cast_utils import *
+from common.utils.model_utils import *
+import torch
+from torch import nn
+import numpy as np
+
+"""
+演示怎么正确处理变长类型的输入，不使用截断的方法，而是使用padding + masking。
+正确理解torch.nn.LSTM的输入和输出。
+从优化的速度和效果来看，耗时间长且优化的loss下降慢，为什么? 可能的原因是:
+1. 整体的sample数目还是有点少。2000个正例，2000个负例。
+2. 每个sample的单词数比较多，几百上千个。
+"""
+
+print("loading and cleaning data")
+df = load_movie_review()
+df['text_remove_punctuations'] = \
+    df['text'].apply(lambda x: remove_punctuations_array(x))
+df.info()
+
+word_dict = build_word_to_int_dict(df['text_remove_punctuations'])
+print(word_dict.total_token)
+print(word_dict.total_uniq_word)
+
+print("encoding")
+df['encode'] = df['text_remove_punctuations'].apply(lambda x: word_dict.encode_tokenized_sentence(x))
+
+print(df.loc[0:0, ['text_remove_punctuations']])
+print(df.loc[0:0, ['encode']])
+
+df.drop(columns=['text_remove_punctuations', 'text'], inplace=True)
+
+df['label_encode'] = df['label'].apply(lambda x: 0 if x == 'neg' else 1)
+df.drop(columns=['label'], inplace=True)
+
+print(df.loc[0:1])
 
 
-class ESIM(nn.Module):
-    def __init__(self, args):
-        super(ESIM, self).__init__()
-        self.dropout = 0.5
-        self.hidden_size = args["hidden_size"]
-        self.embeds_dim = args["embeds_dim"]
-        # num_word = 20000
-        self.num_word = args["num_word"]
-        self.linear_size = args["linear_size"]
-        self.embeds = nn.Embedding(self.num_word, self.embeds_dim)
-        self.bn_embeds = nn.BatchNorm1d(self.embeds_dim)
-        # 用于局部
-        self.bilstm1 = nn.LSTM(self.embeds_dim, self.hidden_size, batch_first=True, bidirectional=True)
-        self.bilstm2 = nn.LSTM(self.hidden_size*8, self.hidden_size, batch_first=True, bidirectional=True)
+class VariableNet(nn.Module):
+    def __init__(self, word_dict_size, embedding_dimision, lstm_hidden_size):
+        super(VariableNet, self).__init__()
+        self.word_dict_size = word_dict_size
+        self.embedding_dimision = embedding_dimision
+        self.lstm_hidden_size = lstm_hidden_size
+        # what's value of matrix[0]? - [.0, .0, .0...]
+        self.embedding = torch.nn.Embedding(num_embeddings=word_dict_size,
+                                            embedding_dim=embedding_dimision, padding_idx=0)
+        self.lstm = torch.nn.LSTM(input_size=embedding_dimision, hidden_size=lstm_hidden_size,
+                                  batch_first=True)
+        self.dropout = torch.nn.Dropout()
+        # batch_size * 1
+        self.fc = torch.nn.Linear(lstm_hidden_size, 16)
+        self.relu = torch.nn.ReLU()
+        self.fc2 = torch.nn.Linear(16, 1)
+        # sigmoid
+        self.sigmoid = torch.nn.Sigmoid()
 
-        self.fc = nn.Sequential(
-            nn.BatchNorm1d(self.hidden_size * 8),
-            nn.Linear(self.hidden_size * 8, self.linear_size),
-            nn.ELU(inplace=True),
-            nn.BatchNorm1d(self.linear_size),
-            nn.Dropout(self.dropout),
-            nn.Linear(self.linear_size, self.linear_size),
-            nn.ELU(inplace=True),
-            nn.BatchNorm1d(self.linear_size),
-            nn.Dropout(self.dropout),
-            nn.Linear(self.linear_size, 2),
-            nn.Softmax(dim=-1)
-        )
-
-    def forward(self, input1, input2):
-        # 1. input encoding.
-        sent1, sent2 = input1, input2
-        mask1, mask2 = sent1.eq(0), sent2.eq(0)
-        # 为什么需要BatchNorm1d这一层？- 对比了一下，没有太大的差别。
-        # x1 = self.embeds(sent1)
-        # x2 = self.embeds(sent2)
-        # # embeds: batch_size * seq_len => batch_size * seq_len * dim
-        x1 = self.bn_embeds(self.embeds(sent1).transpose(1, 2).contiguous()).transpose(1, 2)
-        x2 = self.bn_embeds(self.embeds(sent2).transpose(1, 2).contiguous()).transpose(1, 2)
-
-        o1, _ = self.bilstm1(x1)
-        o2, _ = self.bilstm1(x2)
-
-        # 2. local inference. attention计算
-        q1_align, q2_align = soft_attention_align(o1, o2, mask1, mask2)
-
-        # inference增强，这里就是按照公式来的。
-        # batch_size * seq_len * (8 * hidden_size)
-        q1_combined = torch.cat([o1, q1_align, submul(o1, q1_align)], -1)
-        q2_combined = torch.cat([o2, q2_align, submul(o2, q2_align)], -1)
-
-        # 3. inference composition
-        # batch_size * seq_len * (2 * hidden_size)
-        q1_compose, _ = self.bilstm2(q1_combined)
-        q2_compose, _ = self.bilstm2(q2_combined)
-
-        # 再一次用 BiLSTM 提前上下文信息，同时使用 MaxPooling 和 AvgPooling 进行池化操作, 最后接一个全连接层。
-        # input: batch_size * seq_len * (2 * hidden_size)
-        # output: batch_size * (4 * hidden_size)
-        q1_rep = apply_multiple(q1_compose)
-        q2_rep = apply_multiple(q2_compose)
-
-        # 最后输出语义相似度
-        x = torch.cat([q1_rep, q2_rep], -1)
-        similarity = self.fc(x)
-        return similarity
+    def forward(self, x):
+        # 注意每次计算时，要重新初始化h0和c0。
+        h0 = torch.zeros(x.size(0), self.lstm_hidden_size).view((1, x.size(0), -1))
+        c0 = torch.zeros(x.size(0), self.lstm_hidden_size).view((1, x.size(0), -1))
+        # 为了获取变长的每个输入的长度
+        sample_number = x.size(0)
+        # 获取变长的sample的长度
+        sample_lengths = count_nonzero(x)
+        input_embedding = self.embedding(x.long())
+        """
+        转换输入的格式
+        把上一个输入整平，把每个sample的第i个time step按顺序合并到一起，同时会有一个batch_sizes记录每个time step有多少个。
+        例如上例说明第一个time step有2个输入，第二个也是2个，第三个有1个等。
+        采用这样的方式输入到lstm中，可以提高lstm的计算效率。
+        """
+        packed_seq_batch = torch.nn.utils.rnn. \
+            pack_padded_sequence(input_embedding, lengths=sample_lengths, batch_first=True)
+        output, (hn, cn) = self.lstm(packed_seq_batch.float(), (h0.detach(), c0.detach()))
+        """
+        输出也得转回来，这里的问题是：我们不是从padded_output来取结果，而是从hn取结果。原因是因为padded_output对于不是那么长的
+        序列，最后的一个实际上是padding位了。
+        而hn, cs会自动考虑padding的问题, 输出是最后的实际有效位置的。
+        使用实验对比了:
+        padded_output[1:2, sample_lengths[1]:sample_lengths[1] + 1, :]与hn[1:2]的结果是相同的
+        即手动将padded_output的元素自己通过有效位置取出来，不过用hn直接取要更加方便。
+        """
+        padded_output, output_lens = \
+            torch.nn.utils.rnn.pad_packed_sequence(output, batch_first=True)
+        fc_input = hn.view((sample_number, -1))
+        fc_input = self.dropout(fc_input)
+        fc_output = self.fc(fc_input)
+        fc2_input = self.relu(fc_output)
+        fc2_output = self.fc2(fc2_input)
+        sigmoid_output = self.sigmoid(fc2_output)
+        return sigmoid_output
 
 
-def soft_attention_align(x1, x2, mask1, mask2):
-    '''
-    1. 首先计算两个句子 word 之间的相似度，得到2维的相似度矩阵，这里会用到 torch.matmul。
-    2. 用之前得到的相似度矩阵，结合 a，b 两句话，互相生成彼此相似性加权后的句子，维度保持不变。
-    x1: batch_size * seq_len * dim
-    x2: batch_size * seq_len * dim
-    '''
-    # attention: batch_size * seq_len * seq_len
-    attention = torch.matmul(x1, x2.transpose(1, 2))
-    mask1 = mask1.float().masked_fill_(mask1, float('-inf'))
-    mask2 = mask2.float().masked_fill_(mask2, float('-inf'))
+print("create model")
+embedding_dimision = 8
+lstm_hidden_size = 32
+loss_func = torch.nn.BCELoss()
+variable_net = VariableNet(word_dict.total_token, embedding_dimision, lstm_hidden_size)
+optimizer = torch.optim.Adam(variable_net.parameters(), lr=0.01, weight_decay=0.0005)
+epochs = 10
+batch_size = 4
+torch_model_parameters_number(variable_net)
 
-    # weight: batch_size * seq_len * seq_len
-    weight1 = F.softmax(attention + mask2.unsqueeze(1), dim=-1)
-    x1_align = torch.matmul(weight1, x2)
-    weight2 = F.softmax(attention.transpose(1, 2) + mask1.unsqueeze(1), dim=-1)
-    x2_align = torch.matmul(weight2, x1)
-    # x_align: batch_size * seq_len * hidden_size
-    return x1_align, x2_align
+print("partition")
+df = df.sample(frac=1.0).reset_index(drop=True)
+total_sample, _ = df.shape
+partition_num = total_sample / batch_size
+sub_df = np.array_split(df, partition_num)
+print(len(sub_df))
 
-
-def submul(x1, x2):
-    # 按照公式来的
-    mul = x1 * x2
-    sub = x1 - x2
-    return torch.cat([sub, mul], -1)
-
-
-def apply_multiple(x):
-    """
-    使用 MaxPooling 和 AvgPooling 进行池化操作
-    :param x:
-    :return:
-    """
-    # input: batch_size * seq_len * (2 * hidden_size)
-    p1 = F.avg_pool1d(x.transpose(1, 2), x.size(1)).squeeze(-1)
-    p2 = F.max_pool1d(x.transpose(1, 2), x.size(1)).squeeze(-1)
-    # output: batch_size * (4 * hidden_size)
-    return torch.cat([p1, p2], 1)
-
-
-# 使用天池的atec_nlp_sim数据来测试这个model
-print("#0 load sim sentence data")
-tok, vocab_size, X_train_sen1_encode_int, X_train_sen2_encode_int, X_test_sen1_encode_int, X_test_sen2_encode_int, \
-Y_train, Y_test = sentence_sim_helper.prepare_word_encoding_int_for_sentence_sim(100)
-
-print("#1 create ESIM")
-lr = 0.002
-args = {
-    # bilstm hidden size
-    "hidden_size": 256,
-    # word embedding size
-    "embeds_dim": 128,
-    "num_word": vocab_size,
-    "linear_size": 64
-}
-esim_model = ESIM(args)
-model_utils.model_parameters_number(esim_model)
-
-print("#2 create optimizer and loss")
-optimizer = torch.optim.SGD(esim_model.parameters(), lr=lr)
-loss_func = torch.nn.CrossEntropyLoss()
-
-print("#3 start to train")
-n_epoch = 50
-batch_size = 32
-index = 0
-
-sen1_chunks = list(sequence_utils.partition_by_size(X_train_sen1_encode_int, batch_size))
-sen2_chunks = list(sequence_utils.partition_by_size(X_train_sen2_encode_int, batch_size))
-Y_train_chunks = list(sequence_utils.partition_by_size(Y_train, batch_size))
-batch_len = len(sen1_chunks)
-
-for i in range(n_epoch):
+for i in range(0, epochs):
     total_loss = 0
-    total_count = 0
-    total_correct_count = 0
-    for (input1, input2, Y_train_batch) in zip(sen1_chunks, sen2_chunks, Y_train_chunks):
-        total_count += batch_size
-        input1_tensor = type_cast_helper.list_to_tensor(input1).long()
-        input2_tensor = type_cast_helper.list_to_tensor(input2).long()
-        Y_train_batch_tensor = type_cast_helper.list_to_tensor(Y_train_batch).long()
-        output = esim_model(input1_tensor, input2_tensor)
-        # index += 1
-        loss = loss_func(output, Y_train_batch_tensor)
-        total_loss += loss
-        value, idx = output.topk(1)
-        idx = torch.squeeze(idx, 1)
-        correct_count_boolean = idx.eq(Y_train_batch_tensor)
-        # 可以直接算True的数目
-        correct_count = correct_count_boolean.sum().item()
-        total_correct_count += correct_count
+    print("epoch - {}".format(i))
+    batch_num = 0
+    for batch_df in sub_df:
+        batch_df['sentence_len'] = batch_df['encode'].apply(lambda x: len(x))
+        batch_df.sort_values('sentence_len', ascending=False, inplace=True)
+        # X is list of variable list.
+        X = series_to_list(batch_df['encode'])
+        Y = series_to_list(batch_df['label_encode'])
+        X_tensor = var_list_to_tensor(X, 0)
+        Y_tensor = list_to_tensor(Y)
+        sample_number, maxlen = X_tensor.shape
+        Y_tensor_reshape = Y_tensor.view((sample_number, -1))
+        # 清理上一轮的梯度
         optimizer.zero_grad()
+        output = variable_net(X_tensor)
+        loss = loss_func(output, Y_tensor_reshape.float())
+        print("epoch - {}, batch - {}, loss - {}".format(i, batch_num, loss))
+        # for predict, actual in zip(output, Y_tensor_reshape):
+        #     print("predict 1 - {}, actual - {}".format(predict, actual))
         loss.backward()
         optimizer.step()
-    print("epoch %d, average loss %f, accuracy %f" % (i, total_loss / batch_len, total_correct_count / total_count))
-print("train finish")
-
+        # output2 = variable_net(X_tensor)
+        # loss2 = loss_func(output2, Y_tensor_reshape.float())
+        # for predict, actual in zip(output2, Y_tensor_reshape):
+        #     print("predict 2 - {}, actual - {}, after loss - {}".format(predict, actual, loss2))
+        # print()
+        total_loss += loss
+        batch_num += 1
+    print("epoch - {}, total loss - {}".format(i, total_loss))
