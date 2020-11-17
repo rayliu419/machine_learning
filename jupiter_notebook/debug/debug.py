@@ -1,23 +1,24 @@
 import sys
 sys.path.append("..")
-from common.data_loader.load_movie_review import *
-from common.lng_processor.eng_process import *
-from common.utils.sequence_utils import *
+from common.utils import sequence_utils
 from common.utils.type_cast_utils import *
 from common.utils.model_utils import *
+from common.utils.nlp_utils import *
+from common.data_loader import movie_review_helper
+from common.lng_processor.eng_process import *
 import torch
 from torch import nn
-import numpy as np
 
 """
 演示怎么正确处理变长类型的输入，不使用截断的方法，而是使用padding + masking。
 正确理解torch.nn.LSTM的输入和输出。
+"""
+
+"""
+新的电影评论在这个上面的性能不好。
 从优化的速度和效果来看，耗时间长且优化的loss下降慢，为什么? 可能的原因是:
 1. 整体的sample数目还是有点少。2000个正例，2000个负例。
 2. 每个sample的单词数比较多，几百上千个。
-"""
-
-print("loading and cleaning data")
 df = load_movie_review()
 df['text_remove_punctuations'] = \
     df['text'].apply(lambda x: remove_punctuations_array(x))
@@ -39,6 +40,28 @@ df['label_encode'] = df['label'].apply(lambda x: 0 if x == 'neg' else 1)
 df.drop(columns=['label'], inplace=True)
 
 print(df.loc[0:1])
+"""
+
+print("loading and cleaning data")
+df = movie_review_helper.prepare_movie_review_raw(5000)
+df['text_remove_punctuations'] = \
+    df['text'].apply(lambda x: remove_punctuations_array(x))
+df.info()
+
+word_dict = build_word_to_int_dictionary(df['text_remove_punctuations'])
+print(word_dict.total_token)
+print(word_dict.total_uniq_word)
+
+print("encoding")
+df['encode'] = df['text_remove_punctuations'].apply(lambda x: word_dict.encode_tokenized_sentence(x))
+
+print(df.loc[0:0, ['text_remove_punctuations']])
+print(df.loc[0:0, ['encode']])
+
+df.drop(columns=['text_remove_punctuations', 'text'], inplace=True)
+
+df['label_encode'] = df['label'].apply(lambda x: 0 if x == 'negative' else 1)
+df.drop(columns=['label'], inplace=True)
 
 
 class VariableNet(nn.Module):
@@ -67,7 +90,7 @@ class VariableNet(nn.Module):
         # 为了获取变长的每个输入的长度
         sample_number = x.size(0)
         # 获取变长的sample的长度
-        sample_lengths = count_nonzero(x)
+        sample_lengths = sequence_utils.count_nonzero(x)
         input_embedding = self.embedding(x.long())
         """
         转换输入的格式
@@ -104,7 +127,7 @@ loss_func = torch.nn.BCELoss()
 variable_net = VariableNet(word_dict.total_token, embedding_dimision, lstm_hidden_size)
 optimizer = torch.optim.Adam(variable_net.parameters(), lr=0.01, weight_decay=0.0005)
 epochs = 10
-batch_size = 4
+batch_size = 32
 torch_model_parameters_number(variable_net)
 
 print("partition")

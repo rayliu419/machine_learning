@@ -97,7 +97,7 @@ def merge_to_single_line(text):
     return single_line
 
 
-def build_word_to_int_dict(sentence_array):
+def build_word_to_int_dictionary(sentence_array):
     word_dict = WordDict()
     for sentence in sentence_array:
         for word in sentence:

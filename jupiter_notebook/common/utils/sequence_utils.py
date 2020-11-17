@@ -31,6 +31,7 @@ def count_nonzero(tensor_2d):
     """
     pytorch 1.7 has this function, but now let's implement a simple version.
     :return:
+    array - (1 * sample_number)
     """
     _, column_number = tensor_2d.shape
     return column_number - (tensor_2d == 0).sum(dim=1)

@@ -2,28 +2,28 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from common.english_preprocess import *
+import sys
+sys.path.append("..")
+from common.lng_processor.english_preprocess import *
+from common.lng_processor.eng_process import *
 import gensim
 import os
 
 
-def prepare_movie_review_raw(line_num=100):
+def prepare_movie_review_raw(line_num=1000):
     """
+    返回原始数据集。后来有一个新的数据集。
     :param line_num:
-    :return: two data frame
+    :return:
     """
-    print("#1 load data")
     data_file = os.path.dirname(__file__) + "/input_data/IMDB_Dataset.csv"
-    movie_reviews = pd.read_csv(data_file)
-    movie_reviews.info()
-    movie_reviews = movie_reviews[0:line_num]
-    print("#2 clean and processing data")
-    movie_reviews["review"] = movie_reviews["review"].map(lambda x: preprocess_text(x))
-    movie_reviews["sentiment"] = movie_reviews["sentiment"].map(lambda x: 1 if x == "positive" else 0)
-    movie_reviews.head()
-    X = movie_reviews["review"]
-    Y = movie_reviews["sentiment"]
-    return X, Y
+    df = pd.read_csv(data_file)
+    df.info()
+    df = df[0:line_num]
+    df.rename(columns={"review": "text", "sentiment": "label"}, inplace=True)
+    df["text"] = df['text'].apply(lambda x: tokenize(x))
+    df.head()
+    return df
 
 
 def prepare_movie_review_for_task(line_num=100, maxlen=100, embedding_size=10):
