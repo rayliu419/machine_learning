@@ -2,8 +2,14 @@ import pandas as pd
 import os
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import train_test_split
-import chinese_preprocess
-import type_cast_helper
+import sys
+sys.path.append("..")
+from common.lng_processor import chinese_preprocess
+from common.utils import type_cast_utils
+
+"""
+天池数据集loader，判断句子的相似性。
+"""
 
 
 def prepare_raw_data_for_sentence_sim(line_num=100):
@@ -40,22 +46,22 @@ def prepare_word_encoding_int_for_sentence_sim(line_num=100, max_len=20):
     X_train, X_test, Y_train, Y_test = train_test_split(sim_pair, is_sim, test_size=0.20, random_state=42)
 
     print("#4 encoding to int")
-    X_train_sen1 = type_cast_helper.series_to_list(X_train[1])
-    X_train_sen2 = type_cast_helper.series_to_list(X_train[2])
+    X_train_sen1 = type_cast_utils.series_to_list(X_train[1])
+    X_train_sen2 = type_cast_utils.series_to_list(X_train[2])
     X_train_sen1_seg_word = chinese_preprocess.seg_chinese_word_array(X_train_sen1)
     X_train_sen2_seg_word = chinese_preprocess.seg_chinese_word_array(X_train_sen2)
     X_train_sen1_encode_int = chinese_preprocess.encode_chinese_word_to_int_with_tok(tok, X_train_sen1_seg_word)
     X_train_sen2_encode_int = chinese_preprocess.encode_chinese_word_to_int_with_tok(tok, X_train_sen2_seg_word)
 
-    X_test_sen1 = type_cast_helper.series_to_list(X_test[1])
-    X_test_sen2 = type_cast_helper.series_to_list(X_test[2])
+    X_test_sen1 = type_cast_utils.series_to_list(X_test[1])
+    X_test_sen2 = type_cast_utils.series_to_list(X_test[2])
     X_test_sen1_seg_word = chinese_preprocess.seg_chinese_word_array(X_test_sen1)
     X_test_sen2_seg_word = chinese_preprocess.seg_chinese_word_array(X_test_sen2)
     X_test_sen1_encode_int = chinese_preprocess.encode_chinese_word_to_int_with_tok(tok, X_test_sen1_seg_word)
     X_test_sen2_encode_int = chinese_preprocess.encode_chinese_word_to_int_with_tok(tok, X_test_sen2_seg_word)
 
-    Y_train = type_cast_helper.series_to_list(Y_train)
-    Y_test = type_cast_helper.series_to_list(Y_test)
+    Y_train = type_cast_utils.series_to_list(Y_train)
+    Y_test = type_cast_utils.series_to_list(Y_test)
     Y_train = list(map(int, Y_train))
     Y_test = list(map(int, Y_test))
     print(X_train_sen1_seg_word[1])
